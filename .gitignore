@@ -1,0 +1,16 @@
+# Byte-compiled / optimized Python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments (local dependencies)
+.venv/
+venv/
+env/
+
+# Sensitive environment variables (Never commit your secrets!)
+.env
+
+# IDE settings
+.vscode/
+.idea/

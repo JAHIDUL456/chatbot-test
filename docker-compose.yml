@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: fastapi_groq_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - ENV=development
+    # Override default CMD to enable hot reload during development
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
