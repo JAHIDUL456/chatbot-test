@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+import time
 
 
 async def test_generate_insight():
@@ -25,25 +26,42 @@ async def test_generate_insight():
 
     url = "http://127.0.0.1:8000/generate-insight"
     
-    print("Sending request to FastAPI endpoint...")
     async with httpx.AsyncClient(timeout=30.0) as client:
+        # Call 1: Expecting a cache miss (calling Groq LLM)
+        print("--- [Call 1] Sending request (Cache Miss expected) ---")
+        start_time = time.time()
         try:
             response = await client.post(url, json=payload)
-            print(f"Status Code: {response.status_code}")
+            duration = time.time() - start_time
+            print(f"Status Code: {response.status_code} | Duration: {duration:.2f}s")
             if response.status_code == 200:
                 data = response.json()
-                print("\n--- Analytics Response ---")
-                print(f"Success: {data.get('success')}")
-                print(f"Model Used: {data.get('model')}")
-                print("Analytics Summary:")
-                print(f"  Total Revenue: ৳{data.get('analytics', {}).get('total_revenue')}")
-                print(f"  Top Selling Product: {data.get('analytics', {}).get('top_product')}")
-                print(f"  Low Stock Products: {data.get('analytics', {}).get('low_stock')}")
-                print("\n--- AI Bengali Insights ---")
-                print(data.get('ai_insight_bn'))
+                print(f"Success Flag: {data.get('success')}")
+                print(f"Engine/Model Used: {data.get('model')}")
+                print(f"Top Product: {data.get('analytics', {}).get('top_product')}")
+                print("\nInsights Preview:")
+                print("\n".join(data.get('ai_insight_bn', '').split('\n')[:5]) + "\n...")
             else:
-                print("Error Details:")
-                print(response.text)
+                print(f"Error: {response.text}")
+        except Exception as e:
+            print(f"Request failed: {e}")
+
+        print("\n" + "="*50 + "\n")
+
+        # Call 2: Expecting a cache hit (serving immediately from memory)
+        print("--- [Call 2] Sending identical request (Cache Hit expected) ---")
+        start_time = time.time()
+        try:
+            response = await client.post(url, json=payload)
+            duration = time.time() - start_time
+            print(f"Status Code: {response.status_code} | Duration: {duration:.2f}s")
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Success Flag: {data.get('success')}")
+                print(f"Engine/Model Used: {data.get('model')} (Zero LLM token usage!)")
+                print(f"Top Product: {data.get('analytics', {}).get('top_product')}")
+            else:
+                print(f"Error: {response.text}")
         except Exception as e:
             print(f"Request failed: {e}")
 

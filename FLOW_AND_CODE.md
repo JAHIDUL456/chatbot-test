@@ -1,4 +1,4 @@
-# AI-Powered Shop Insight System: Full Code Flow & Implementation Guide
+# AI-Powered Shop Insight System: Full Code Flow & Optimization Guide
 
 This document provides a comprehensive walkthrough of the AI-Powered Shop Insight System backend. The system acts as a stateless, high-performance retail analytics engine that computes business metrics locally in Python and leverages Groq LLM to generate actionable business advice in Bengali.
 
@@ -6,41 +6,57 @@ This document provides a comprehensive walkthrough of the AI-Powered Shop Insigh
 
 ## 🏗️ System Architecture & Data Flow
 
-The backend is entirely stateless and does not utilize any database. Data flows from the Flutter application (using local SQLite storage) to the FastAPI backend, which processes the calculations and requests insights from the Groq inference engine.
+The backend is entirely stateless and does not utilize any database. To optimize for high user loads (5,000+ users) and strict API rate limits (RPM, TPM, RPD), we implement:
+1. **In-Memory TTL Caching**: Hashes calculated metrics to prevent redundant Groq API queries.
+2. **Compact Completion Targets**: System instructions restrict LLM responses to 120-150 words and output max-token constraints, saving substantial TPM (Tokens Per Minute).
+3. **Double Fallback Recovery**: Automatically attempts to fallback to a secondary model and then to a high-quality local rule-based engine in case of quota denial or rate limits (HTTP 429).
 
 ```mermaid
 sequenceDiagram
     participant Flutter as Flutter App (SQLite)
     participant FastAPI as FastAPI (Stateless Engine)
+    participant Cache as In-Memory Cache
     participant Groq as Groq Cloud (llama-3.1-8b-instant)
 
-    Flutter->>FastAPI: POST /generate-insight (raw sales & stock data)
+    Flutter->>FastAPI: POST /generate-insight (sales & stock data)
     Note over FastAPI: 1. Sum total revenue & quantities<br/>2. Find top selling product<br/>3. Rank products by revenue<br/>4. Detect low stock (< 10 remaining)<br/>5. Detect dead stock (stock > 0 but 0 sales)
-    Note over FastAPI: 6. Construct compact textual summary (No raw records sent)
-    FastAPI->>Groq: ChatCompletion Request (Compact Summary & Bengali Prompts)
-    alt Groq llama-3.1-8b-instant Success
-        Groq-->>FastAPI: returns Bengali Insights text
-    else Groq llama-3.1-8b-instant Blocked/Rate-limited
-        Note over FastAPI: Trigger Automatic Fallback Retry
-        FastAPI->>Groq: ChatCompletion Request using llama-3.3-70b-versatile
-        Groq-->>FastAPI: returns Bengali Insights text
+    FastAPI->>Cache: Query Cache (SHA256 signature of metrics)
+    alt Cache Hit (Same shop state & period cached)
+        Cache-->>FastAPI: returns Cached Bengali Insight
+        FastAPI-->>Flutter: returns InsightResponse (model: cache-hit) [Duration: ~20ms, 0 API cost]
+    else Cache Miss
+        Note over FastAPI: Prepare compact textual summary
+        FastAPI->>Groq: ChatCompletion Request (llama-3.1-8b-instant)
+        alt Success
+            Groq-->>FastAPI: returns Bengali Insights text
+            FastAPI->>Cache: Store in Cache (1 hour TTL)
+            FastAPI-->>Flutter: returns InsightResponse (model: llama-3.1-8b-instant)
+        else Blocked / Rate-limited (429)
+            Note over FastAPI: Fallback to secondary settings model
+            FastAPI->>Groq: ChatCompletion Request (llama-3.3-70b-versatile)
+            alt Fallback Success
+                Groq-->>FastAPI: returns Bengali Insights text
+                FastAPI->>Cache: Store in Cache (1 hour TTL)
+                FastAPI-->>Flutter: returns InsightResponse (model: llama-3.3-70b-versatile)
+            else Fallback Blocked / Failed
+                Note over FastAPI: Activate Local Rule-based Generator
+                FastAPI-->>Flutter: returns Local-generated Insight (model: local-rule-engine)
+            end
+        end
     end
-    FastAPI-->>Flutter: returns InsightResponse (success, analytics, ai_insight_bn, model)
 ```
 
 ---
 
-## 🧮 Retail Metric Calculations (Performed in Python)
+## 🧮 Calculations Performed in Python
+Before calling Groq, the following business metrics are computed directly in the API layer:
 
-To minimize token usage, increase performance, and preserve user privacy, raw transactional sales lists are never sent directly to the AI model. Instead, calculations are computed locally in Python:
-
-1. **Total Revenue**: Sum of `revenue` for all records in the `sales` array.
-   $$\text{Total Revenue} = \sum \text{item.revenue}$$
-2. **Total Quantity**: Sum of `qty` for all records in the `sales` array.
-3. **Top Selling Product**: The product that has the highest aggregated quantity (`qty`) in the sales list.
-4. **Product Ranking**: Products sorted in descending order of their total sales revenue.
-5. **Low Stock Detection**: Filtered list of products from the `stock` array where `remaining < 10`.
-6. **Dead Stock Detection**: Filtered list of products that have inventory remaining (`remaining > 0` in the stock array) but have generated zero revenue (`revenue == 0` or absent in the sales list) during the period.
+*   **Total Revenue**: Sum of all `revenue` fields in `sales`.
+*   **Total Quantity Sold**: Sum of all `qty` fields in `sales`.
+*   **Top Selling Product**: Product with the highest total quantity sold.
+*   **Product Ranking by Revenue**: Sorting products based on revenue.
+*   **Low Stock Detection**: Filtering products where `remaining < 10`.
+*   **Dead Stock Detection**: Identifying products with remaining inventory (`remaining > 0`) but `0` sales recorded in the given period.
 
 ---
 
@@ -124,7 +140,62 @@ class InsightResponse(BaseModel):
 
 ---
 
-### 3. Groq Service Wrapper: `app/services/groq_client.py`
+### 3. In-Memory Cache: `app/services/insight_cache.py`
+Implements memory-based caching with TTL and FIFO size eviction.
+
+```python
+import time
+import hashlib
+import json
+import logging
+from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class InsightCache:
+    def __init__(self, ttl_seconds: int = 3600, max_size: int = 2000) -> None:
+        self.ttl = ttl_seconds
+        self.max_size = max_size
+        self.cache: Dict[str, Dict[str, Any]] = {}
+
+    def _hash_payload(self, shop_name: str, period: str, summary_dict: Dict[str, Any]) -> str:
+        serialized = json.dumps({
+            "shop_name": shop_name.strip().lower(),
+            "period": period.strip().lower(),
+            "summary": summary_dict
+        }, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def get(self, shop_name: str, period: str, summary_dict: Dict[str, Any]) -> Optional[str]:
+        cache_key = self._hash_payload(shop_name, period, summary_dict)
+        if cache_key in self.cache:
+            entry = self.cache[cache_key]
+            if time.time() - entry["timestamp"] < self.ttl:
+                logger.info(f"Cache hit for shop '{shop_name}'")
+                return entry["value"]
+            else:
+                del self.cache[cache_key]
+        return None
+
+    def set(self, shop_name: str, period: str, summary_dict: Dict[str, Any], value: str) -> None:
+        cache_key = self._hash_payload(shop_name, period, summary_dict)
+        if len(self.cache) >= self.max_size:
+            oldest_key = next(iter(self.cache))
+            del self.cache[oldest_key]
+            
+        self.cache[cache_key] = {
+            "value": value,
+            "timestamp": time.time()
+        }
+
+
+insight_cache = InsightCache(ttl_seconds=3600, max_size=2000)
+```
+
+---
+
+### 4. Groq Service Wrapper: `app/services/groq_client.py`
 Encapsulates communication with Groq using `AsyncGroq`.
 
 ```python
@@ -139,7 +210,6 @@ logger = logging.getLogger(__name__)
 
 class GroqService:
     def __init__(self) -> None:
-        # Initialize Groq client with built-in exponential backoff retries (up to 5)
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY, max_retries=5)
         self.model = settings.GROQ_MODEL
 
@@ -184,8 +254,8 @@ groq_service = GroqService()
 
 ---
 
-### 4. Insight Endpoint Logic: `app/api/v1/endpoints/insight.py`
-Executes calculations, builds prompts, and manages the Groq automatic model fallback mechanism.
+### 5. Insight Endpoint Logic: `app/api/v1/endpoints/insight.py`
+Executes calculations, checks cache, calls LLM, and triggers local rule-based suggestions upon API failures.
 
 ```python
 import logging
@@ -194,9 +264,51 @@ from fastapi import APIRouter, HTTPException, status
 from app.core.config import settings
 from app.schemas.insight import InsightRequest, InsightResponse, AnalyticsSummary
 from app.services.groq_client import groq_service
+from app.services.insight_cache import insight_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def generate_local_fallback_insights(
+    shop_name: str,
+    period: str,
+    total_revenue: float,
+    top_product: str,
+    low_stock: list,
+    dead_stock: list
+) -> str:
+    insights = f"### ব্যবসার অবস্থা বিশ্লেষণ\n\nগত {period}-এ '{shop_name}' এর মোট বিক্রি থেকে অর্জিত রাজস্ব ছিল ৳{total_revenue:,.2f}। "
+    if top_product and top_product != "None":
+        insights += f"এই সময়ে সবচেয়ে জনপ্রিয় ও বিক্রির শীর্ষে থাকা পণ্য ছিল '{top_product}'। "
+    
+    if dead_stock:
+        insights += f"তবে দোকানে কিছু অচল স্টক ({', '.join(dead_stock[:3])}) রয়েছে যা এসময়ে বিক্রি হয়নি। "
+    else:
+        insights += "দোকানের সব পণ্যই নিয়মিত কম-বেশি বিক্রি হচ্ছে।"
+        
+    insights += "\n\n### ইনভেন্টরি বা স্টক উন্নত করার পরামর্শ\n\n"
+    if low_stock:
+        insights += f"* কম স্টক থাকা পণ্যগুলোর ({', '.join(low_stock[:3])}) স্টক লেভেল ১০ এর নিচে নেমে গেছে। গ্রাহক হারানোর আগে দ্রুত এগুলো পুনরায় সংগ্রহ করুন।\n"
+    if dead_stock:
+        insights += f"* অবিক্রীত বা অচল স্টকগুলোর ({', '.join(dead_stock[:3])}) জন্য বিশেষ মূল্যছাড় বা আকর্ষণীয় অফার দিয়ে দ্রুত ক্লিয়ার করার ব্যবস্থা নিন।\n"
+    if not low_stock and not dead_stock:
+        insights += "* আপনার ইনভেন্টরি ব্যালেন্স সন্তোষজনক। নিয়মিত স্টকের পরিমাণ পর্যবেক্ষণ করুন।\n"
+
+    insights += "\n### ভবিষ্যৎ বিক্রয়ের গতিধারা বা ট্রেন্ড\n\n"
+    if top_product and top_product != "None":
+        insights += f"* আগামী দিনগুলোতেও '{top_product}' এর জোরালো চাহিদা অব্যাহত থাকার প্রবল সম্ভাবনা রয়েছে। পর্যাপ্ত স্টক প্রস্তুত রাখুন।\n"
+    insights += "* আসন্ন দিনগুলোতে ক্রেতা ধরে রাখতে সর্বাধিক বিক্রিত পণ্যগুলোর পাশে মানসম্মত নতুন পণ্য যোগ করার চেষ্টা করুন।\n"
+
+    insights += "\n### দোকানদারের জন্য সরাসরি পালনযোগ্য পরামর্শ\n\n"
+    insights += f"১. ব্যবসার প্রধান পণ্য হিসেবে '{top_product}' এর সরবরাহ সবসময় সচল রাখুন।\n"
+    if low_stock:
+        insights += "২. কম স্টকের পণ্যগুলোর তালিকা প্রস্তুত করে আজই ডিলারের কাছে নতুন অর্ডার দিন।\n"
+    if dead_stock:
+        insights += "৩. অচল পণ্যগুলো দোকানের আকর্ষণীয় জায়গায় প্রদর্শন করুন বা বান্ডেল আকারে বিক্রি করুন।\n"
+    insights += "৪. ক্রেতাদের চাহিদা বুঝতে নিয়মিতSQLite লোকাল ডাটাবেজে বেচাকেনার হিসাব লিখে রাখুন।"
+    
+    return insights
 
 
 @router.post(
@@ -209,7 +321,7 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
     try:
         logger.info(f"Processing insight request for shop: '{request.shop_name}'")
 
-        # 1. Aggregating Sales Data (handling duplicates if any)
+        # Local Computations
         product_sales_revenue = {}
         product_sales_qty = {}
         for item in request.sales:
@@ -218,18 +330,17 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             product_sales_qty[p] = product_sales_qty.get(p, 0.0) + item.qty
 
         total_revenue = sum(item.revenue for item in request.sales)
+        total_qty = sum(item.qty for item in request.sales)
 
-        # 2. Identify top product by quantity sold
         if product_sales_qty:
             top_product = max(product_sales_qty, key=lambda k: product_sales_qty[k])
         else:
             top_product = "None"
 
-        # 3. Rank top 5 products by revenue for prompt enrichment
         sorted_by_revenue = sorted(product_sales_revenue.items(), key=lambda x: x[1], reverse=True)
+        top_revenue_list = [{"product": p, "revenue": r} for p, r in sorted_by_revenue[:5]]
         revenue_ranking_str = ", ".join([f"{p} (৳{r:.2f})" for p, r in sorted_by_revenue[:5]])
 
-        # 4. Group stocks & detect low stock (< 10 remaining)
         product_stock_levels = {}
         for item in request.stock:
             p = item.product
@@ -237,41 +348,54 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
 
         low_stock_products = [p for p, rem in product_stock_levels.items() if rem < 10]
 
-        # 5. Dead stock detection (stock > 0 but revenue == 0 during the period)
         dead_stock_products = []
         for p, rem in product_stock_levels.items():
             if rem > 0 and product_sales_revenue.get(p, 0.0) == 0.0:
                 dead_stock_products.append(p)
 
-        # 6. Structuring prompt content
+        # Hashing computed metrics for cache check
+        summary_dict = {
+            "total_revenue": total_revenue,
+            "total_qty": total_qty,
+            "top_product": top_product,
+            "top_revenue_list": top_revenue_list,
+            "low_stock_products": sorted(low_stock_products),
+            "dead_stock_products": sorted(dead_stock_products)
+        }
+
+        # Check in-memory Cache
+        cached_insight = insight_cache.get(request.shop_name, request.period, summary_dict)
+        if cached_insight:
+            analytics_summary = AnalyticsSummary(
+                total_revenue=total_revenue, top_product=top_product, low_stock=low_stock_products
+            )
+            return InsightResponse(
+                success=True, analytics=analytics_summary, ai_insight_bn=cached_insight, model="cache-hit"
+            )
+
+        # Prepare compact prompts
         low_stock_str = ", ".join(low_stock_products) if low_stock_products else "None"
         dead_stock_str = ", ".join(dead_stock_products) if dead_stock_products else "None"
 
         system_instruction = (
-            "You are a professional, friendly, and expert retail consultant speaking fluent Bengali. "
-            "Your objective is to provide a brief, high-value, and actionable business report for a shopkeeper. "
-            "You must write exclusively in Bengali (বাংলা). Do not translate the business metrics names into english characters, "
-            "but present your recommendations, trend predictions, and stock suggestions clearly. "
-            "Keep the output clean and structure it into four distinct sections:\n"
-            "1. ব্যবসার অবস্থা বিশ্লেষণ (Business Insights)\n"
-            "2. ইনভেন্টরি বা স্টক উন্নত করার পরামর্শ (Stock Suggestions)\n"
-            "3. ভবিষ্যৎ বিক্রয়ের গতিধারা বা ট্রেন্ড (Future Trends)\n"
-            "4. দোকানদারের জন্য সরাসরি পালনযোগ্য পরামর্শ (Actionable Advice)"
+            "You are a friendly, expert retail consultant speaking fluent Bengali. "
+            "Write a brief, high-value shop insight report in Bengali. "
+            "IMPORTANT: Limit the entire response to 120-150 words maximum. Be extremely concise. "
+            "Structure into 4 short sections:\n"
+            "1. ব্যবসার অবস্থা বিশ্লেষণ (Insights)\n"
+            "2. স্টক উন্নত করার পরামর্শ (Stock suggestions)\n"
+            "3. ভবিষ্যৎ বিক্রয়ের ট্রেন্ড (Future trends)\n"
+            "4. দোকানদারের জন্য পরামর্শ (Actionable advice)"
         )
 
         user_content = (
-            f"দোকানের নাম (Shop Name): {request.shop_name}\n"
-            f"সময়কাল (Period): {request.period}\n"
-            f"মোট রাজস্ব (Total Revenue): ৳{total_revenue:.2f}\n"
-            f"সবচেয়ে বেশি বিক্রি হওয়া পণ্য (Top Selling Product): {top_product}\n"
-            f"রাজস্ব অনুযায়ী শীর্ষ পণ্যসমূহ: {revenue_ranking_str if revenue_ranking_str else 'None'}\n"
-            f"কম স্টক থাকা পণ্য (< 10 units): {low_stock_str}\n"
-            f"অচল বা অবিক্রীত স্টক (has inventory but 0 sales): {dead_stock_str}\n\n"
-            "অনুগ্রহ করে উপরোক্ত তথ্য বিশ্লেষণ করে নিম্নলিখিত বিষয়গুলো বাংলায় প্রদান করুন:\n"
-            "- ব্যবসার সার্বিক অবস্থার বিশ্লেষণ (Bengali business insights)\n"
-            "- স্টক বা ইনভেন্টরি উন্নত করার পরামর্শ (Stock improvement suggestions)\n"
-            "- ভবিষ্যৎ বিক্রয়ের ট্রেন্ড বা গতিধারার পূর্বাভাস (Predict future sales trend)\n"
-            "- দোকানদারের জন্য সরাসরি পালনযোগ্য ও বাস্তবসম্মত পরামর্শ (Actionable advice for shopkeeper)"
+            f"দোকান: {request.shop_name}\n"
+            f"রাজস্ব: ৳{total_revenue:.0f}\n"
+            f"সেরা পণ্য: {top_product}\n"
+            f"শীর্ষ পণ্যসমূহ: {revenue_ranking_str}\n"
+            f"কম স্টক (<১০): {low_stock_str}\n"
+            f"অচল স্টক (বিক্রি ০): {dead_stock_str}\n"
+            "এই তথ্যের ভিত্তিতে সংক্ষেপে বাংলায় পরামর্শ দিন।"
         )
 
         messages = [
@@ -279,31 +403,38 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             {"role": "user", "content": user_content}
         ]
 
-        # 7. Request insights with fallback safety
+        # Call Groq with fallbacks
         model_name = "llama-3.1-8b-instant"
+        ai_insight_text = ""
+        
         try:
             ai_insight_text, _ = await groq_service.generate_chat_completion(
-                messages=messages,
-                temperature=0.7,
-                model=model_name
+                messages=messages, temperature=0.7, max_tokens=350, model=model_name
             )
         except Exception as api_err:
-            logger.warning(
-                f"Failed to generate insight using model {model_name}. "
-                f"Attempting fallback to default '{settings.GROQ_MODEL}'... Error: {api_err}"
-            )
-            model_name = settings.GROQ_MODEL
-            ai_insight_text, _ = await groq_service.generate_chat_completion(
-                messages=messages,
-                temperature=0.7,
-                model=model_name
-            )
+            logger.warning(f"Primary model failed. Trying fallback model '{settings.GROQ_MODEL}'... Error: {api_err}")
+            try:
+                model_name = settings.GROQ_MODEL
+                ai_insight_text, _ = await groq_service.generate_chat_completion(
+                    messages=messages, temperature=0.7, max_tokens=350, model=model_name
+                )
+            except Exception as final_api_err:
+                logger.error(f"Fallback model failed. Activating local fallback generator...")
+                model_name = "local-rule-engine"
+                ai_insight_text = generate_local_fallback_insights(
+                    shop_name=request.shop_name,
+                    period=request.period,
+                    total_revenue=total_revenue,
+                    top_product=top_product,
+                    low_stock=low_stock_products,
+                    dead_stock=dead_stock_products
+                )
 
-        # 8. Return response
+        if model_name != "local-rule-engine":
+            insight_cache.set(request.shop_name, request.period, summary_dict, ai_insight_text)
+
         analytics_summary = AnalyticsSummary(
-            total_revenue=total_revenue,
-            top_product=top_product,
-            low_stock=low_stock_products
+            total_revenue=total_revenue, top_product=top_product, low_stock=low_stock_products
         )
 
         return InsightResponse(
@@ -319,23 +450,6 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal Server Error: {str(e)}"
         )
-```
-
----
-
-### 5. API Router: `app/api/v1/api.py`
-Includes versioned routers.
-
-```python
-from fastapi import APIRouter
-from app.api.v1.endpoints import insight
-
-api_router = APIRouter()
-
-api_router.include_router(
-    insight.router,
-    tags=["Shop Insights"]
-)
 ```
 
 ---
@@ -411,18 +525,14 @@ async def health_check() -> dict:
 
 ## 🚀 How to Run and Test
 
-1. **Activate Virtual Environment**:
-   ```bash
-   source .venv/bin/env/activate  # or run directly using python path:
-   # ./.venv/bin/python
-   ```
-2. **Start the FastAPI Server**:
+1. **Start the FastAPI Server**:
    ```bash
    uvicorn app.main:app --reload
    ```
-3. **Execute Test Script**:
+2. **Execute Test Script**:
    ```bash
    ./.venv/bin/python test_insight.py
    ```
-4. **Access API Documentation**:
-   Visit [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) in your browser to inspect or test endpoints interactively.
+   *Expected Output of execution*:
+   - Call 1 takes ~2 seconds and fetches from the LLM.
+   - Call 2 takes ~0.02 seconds and returns instantly using `cache-hit` with 0 token consumption!
