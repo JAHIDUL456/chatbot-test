@@ -25,76 +25,46 @@ def parse_date_naive(date_str: Optional[str]) -> datetime:
 
 def generate_local_fallback_insights(
     shop_name: str,
-    period: str,
     total_revenue: float,
     revenue_growth: float,
-    inventory_value: float,
     dead_stock_value: float,
     top_product: str,
     stockout_predictions: List[str],
-    sales_velocity_alerts: List[str],
     customer_baki: float,
     supplier_baki: float,
     extra_stats: Dict[str, Any]
 ) -> str:
     """
-    Generates a comprehensive, long-form local fallback report covering the entire inventory portfolio.
+    Generates a simple, direct fallback report with exactly two sections.
     """
-    growth_direction = "বৃদ্ধি" if revenue_growth >= 0 else "হ্রাস"
     growth_sign = "+" if revenue_growth >= 0 else ""
-    net_receivables = customer_baki - supplier_baki
-    net_status = "সারপ্লাস (ইতিবাচক)" if net_receivables >= 0 else "ঘাটতি (নেতিবাচক)"
-    
-    velocity_tiers = extra_stats.get("velocity_tiers", {})
-    dead_details = extra_stats.get("dead_details", [])
-    overstock = extra_stats.get("overstock", [])
-    revenue_concentration = extra_stats.get("revenue_concentration", "")
     declining_trends = extra_stats.get("declining_trends", [])
     accelerating_trends = extra_stats.get("accelerating_trends", [])
     
     insights = (
-        f"### ১. ব্যবসার সামগ্রিক অবস্থা ও বিক্রয় প্রক্ষেপণ (Sales & Revenue Projections)\n\n"
-        f"*   **রাজস্ব ও প্রবৃদ্ধি:** গত {period}-এ **{shop_name}**-এর মোট বিক্রয়লব্ধ রাজস্ব **৳{total_revenue:,.2f}**। "
-        f"আগের মেয়াদের তুলনায় বিক্রি **{growth_sign}{revenue_growth:.1f}% {growth_direction}** পেয়েছে। এই ধারাবাহিকতা বজায় থাকলে পরবর্তী মাসে সম্ভাব্য বিক্রয় লক্ষ্যমাত্রা **৳{total_revenue * (1 + revenue_growth/100):,.2f}**।\n"
-        f"*   **রাজস্বের কেন্দ্রীকরণ (80/20 Rule):** {revenue_concentration}\n"
-        f"*   **বিক্রয় বেগ প্রোফাইল:** বর্তমানে দোকানে মোট **{velocity_tiers.get('fast', 0)}** টি পণ্য দ্রুত গতিতে (Fast-moving), **{velocity_tiers.get('steady', 0)}** টি পণ্য মাঝারি গতিতে (Steady-moving) এবং **{velocity_tiers.get('slow', 0)}** টি পণ্য ধীর গতিতে বিক্রি হচ্ছে।\n"
+        f"১. লাভ বাড়ানোর নিশ্চিত উপায়:\n"
+        f"*   **বেচাকেনা ও প্রবৃদ্ধি:** গত মেয়াদে আপনার মোট বিক্রি হয়েছে **৳{total_revenue:,.2f}** (প্রবৃদ্ধি: **{growth_sign}{revenue_growth:.1f}%**)। পরবর্তী মাসে বিক্রি আরও বাড়াতে আপনার সবচেয়ে বেশি চলা পণ্য **'{top_product}'**-এর স্টক সবসময় ঠিক রাখুন।\n"
     )
-
-    if declining_trends or accelerating_trends:
-        insights += "\n### ২. সাম্প্রতিক ট্রেন্ড ও চাহিদা পরিবর্তন (Demand Trajectory Alerts)\n\n"
-        if declining_trends:
-            insights += "*   **📉 চাহিদা হ্রাস পাওয়া পণ্য (ঝুঁকিপূর্ণ):**\n"
-            for alert in declining_trends[:3]:
-                insights += f"    *   {alert}\n"
-            insights += "    *   *পরামর্শ:* এই পণ্যগুলোর চাহিদা সাম্প্রতিক সময়ে ব্যাপক কমে গেছে। এগুলো নতুন করে স্টক করবেন না। বর্তমান স্টক দ্রুত খালি করুন।\n"
-        if accelerating_trends:
-            insights += "*   **📈 চাহিদা বৃদ্ধি পাওয়া পণ্য (লাভজনক):**\n"
-            for alert in accelerating_trends[:3]:
-                insights += f"    *   {alert}\n"
-            insights += "    *   *পরামর্শ:* এই পণ্যগুলোর বিক্রি দ্রুত বাড়ছে। স্টকআউট এড়াতে বেশি করে স্টক নিয়ে রাখুন।\n"
+    if accelerating_trends:
+        insights += f"*   **চাহিদা বাড়ছে:** {accelerating_trends[0]} পণ্যের বিক্রি বাড়ছে। এর স্টক বাড়ালে লাভ বেশি হবে।\n"
+    
+    insights += (
+        f"*   **বকেয়া টাকা তুলুন:** কাস্টমারদের কাছে আপনার পাওনা বাকি **৳{customer_baki:,.2f}**। এই বকেয়া টাকা তুলে ব্যবসায় খাটালে আপনার লাভ বাড়বে।\n"
+        f"*   **অচল পণ্য কম্বো প্যাক:** দোকানে **৳{dead_stock_value:,.2f}** টাকার মালামাল অচল পড়ে আছে। এগুলো সর্বাধিক বিক্রিত পণ্যের সাথে প্যাকেজ করে কম দামে বিক্রি করে দিন।\n\n"
+    )
 
     insights += (
-        f"\n### ৩. সরবরাহ চেইন ও স্টকআউট পূর্বাভাস (Stockout & Supply Chain Projections)\n\n"
+        f"২. লোকসান এড়ানোর সতর্কতা:\n"
     )
+    if declining_trends:
+        insights += f"*   **বিক্রি কমে যাওয়া পণ্য:** {declining_trends[0]}। এই পণ্যগুলোর চাহিদা দিন দিন কমছে। তাই এগুলো আর নতুন করে কিনবেন না, নতুবা লোকসান হবে।\n"
+    
     if stockout_predictions:
-        insights += "*   **স্টক ফুরিয়ে যাওয়ার ঝুঁকিতে থাকা পণ্য (১-৭ দিন বাকি):**\n"
-        for alert in stockout_predictions[:5]:
-            insights += f"    *   ⚠️ **{alert}**\n"
-        insights += "    *   **ঝুঁকি বিশ্লেষণ:** এই পণ্যগুলো ফুরিয়ে গেলে আপনার দৈনিক রাজস্ব প্রবাহ ব্যাহত হবে। জরুরি ভিত্তিতে পুনরায় অর্ডার করতে হবে।\n"
-    else:
-        insights += "*   **স্টক সতর্কতা:** বর্তমানে কোনো পণ্যেরই অতি-জরুরি স্টকআউটের ঝুঁকি নেই।\n"
-
+        insights += f"*   **স্টক শেষ হওয়ার ঝুঁকি:** {', '.join(stockout_predictions[:3])} খুব দ্রুত ফুরিয়ে যাচ্ছে। এগুলো ফুরিয়ে গেলে কাস্টমার ফিরে যাবে এবং বিক্রি হাতছাড়া হবে।\n"
+        
     insights += (
-        f"\n### ৪. মূলধন অবরুদ্ধ ও বকেয়া নগদ প্রবাহ (Locked Capital & Dues Resolution)\n\n"
-        f"*   **বকেয়া নগদ ব্যালেন্স:** কাস্টমারদের কাছে বকেয়া পাওনা **৳{customer_baki:,.2f}** এবং মহাজনদের কাছে আপনার দেনা **৳{supplier_baki:,.2f}**। "
-        f"আপনার নেট বকেয়া অবস্থান হচ্ছে **৳{net_receivables:,.2f}** ({net_status})।\n"
-        f"*   **অচল মূলধন (Dead Capital):** দোকানে বর্তমানে **৳{dead_stock_value:,.2f}** মূল্যের মালামাল সম্পূর্ণ অচল হয়ে পড়ে আছে (বিক্রি শূন্য)।\n"
+        f"*   **মহাজনের দেনা পরিশোধ:** মহাজনের বকেয়া দেনা **৳{supplier_baki:,.2f}** দ্রুত পরিশোধ না করলে মালামাল পাওয়া বন্ধ হয়ে যেতে পারে, যা বড় লোকসানের কারণ হবে।"
     )
-    if dead_details:
-        insights += "    *   **শীর্ষ অচল পণ্যের তালিকা (মূলধন আটকে আছে):**\n"
-        for name, val in dead_details[:3]:
-            insights += f"        *   ❌ **{name}** (আটকে আছে ৳{val:,.2f})\n"
-
     return insights
 
 
@@ -112,12 +82,12 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
         customer_baki = request.customer_baki or 0.0
         supplier_baki = request.supplier_baki or 0.0
 
-        logger.info(f"Generating comprehensive AI Agent insights for '{shop_name}' over period '{period}'")
+        logger.info(f"Generating simplified AI insights for '{shop_name}' over period '{period}'")
 
         sales_list = request.sales or []
         stock_list = request.stock or []
 
-        # 1. Split timeline into Month 1 (0-30 days), Month 2 (31-60 days), and Month 3 (61-90 days)
+        # 1. Split timeline into Month 1, Month 2, and Month 3
         now = datetime.utcnow()
         m1_start = now - timedelta(days=30)
         m2_start = now - timedelta(days=60)
@@ -127,12 +97,11 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
         days_limit = 7 if period == "last_7_days" else 30
         active_start_date = now - timedelta(days=days_limit)
 
-        # 2. Aggregating sales by time buckets for trajectory tracking
+        # 2. Aggregating sales by time buckets
         sales_m1: Dict[str, float] = {}
         sales_m2: Dict[str, float] = {}
         sales_m3: Dict[str, float] = {}
         
-        # Current active period revenue mapping
         product_sales_revenue = {}
         product_sales_qty = {}
 
@@ -142,7 +111,6 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             rev = item.revenue if item.revenue is not None else 0.0
             date_val = parse_date_naive(item.date)
 
-            # Sum up in monthly buckets
             if date_val >= m1_start:
                 sales_m1[p] = sales_m1.get(p, 0.0) + qty
             elif date_val >= m2_start:
@@ -150,7 +118,6 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             elif date_val >= m3_start:
                 sales_m3[p] = sales_m3.get(p, 0.0) + qty
 
-            # Sum up for selected active period
             if date_val >= active_start_date:
                 product_sales_revenue[p] = product_sales_revenue.get(p, 0.0) + rev
                 product_sales_qty[p] = product_sales_qty.get(p, 0.0) + qty
@@ -179,29 +146,14 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
         else:
             revenue_growth = 0.0
 
-        # 4. Top selling product detection for current active period
+        # 4. Top selling product detection
         top_product = max(product_sales_qty, key=lambda k: product_sales_qty[k]) if product_sales_qty else "None"
 
-        # 5. Top revenue product list (current active period)
+        # 5. Top revenue product list
         sorted_by_revenue = sorted(product_sales_revenue.items(), key=lambda x: x[1], reverse=True)
-        revenue_ranking_str = ", ".join([f"{p} (৳{r:.2f})" for p, r in sorted_by_revenue[:8]])
+        revenue_ranking_str = ", ".join([f"{p} (৳{r:.2f})" for p, r in sorted_by_revenue[:5]])
 
-        # 6. Revenue Concentration calculation (80/20 rule)
-        revenue_concentration_msg = ""
-        if total_revenue > 0:
-            running_rev = 0.0
-            top_contributors = 0
-            for p, rev in sorted_by_revenue:
-                running_rev += rev
-                top_contributors += 1
-                if running_rev >= total_revenue * 0.8:
-                    break
-            percentage_contrib = (top_contributors / len(product_sales_revenue)) * 100 if product_sales_revenue else 0
-            revenue_concentration_msg = f"আপনার মোট রাজস্বের ৮০% অর্জিত হচ্ছে শীর্ষ {top_contributors}টি পণ্য ({percentage_contrib:.1f}%) থেকে। বাকি মালামাল অলস মূলধন ধরে রেখেছে।"
-        else:
-            revenue_concentration_msg = "তথ্য কম থাকার কারণে রাজস্ব ঘনীভবন পরিমাপ করা যায়নি।"
-
-        # 7. Inventory value and Dead Capital calculations
+        # 6. Inventory value and Dead Capital calculations
         inventory_value = 0.0
         dead_stock_value = 0.0
         product_stock_levels = {}
@@ -216,14 +168,13 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             cost = rem * buy_price
             inventory_value += cost
             
-            # Dead Stock: Active stock remaining, but 0 sales generated in the active period
             if product_sales_revenue.get(p, 0.0) == 0.0 and cost > 0:
                 dead_stock_value += cost
                 dead_stock_details.append((p, cost))
 
         dead_stock_details = sorted(dead_stock_details, key=lambda x: x[1], reverse=True)
 
-        # 8. Time-series Trajectory logic (declining vs accelerating trends)
+        # 7. Time-series Trajectory logic
         declining_trends = []
         accelerating_trends = []
         all_unique_products = set(sales_m1.keys()) | set(sales_m2.keys()) | set(sales_m3.keys())
@@ -233,56 +184,33 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             m2_qty = sales_m2.get(p, 0.0)
             m3_qty = sales_m3.get(p, 0.0)
 
-            # Case: Declining trend (Month 3 > Month 2 > Month 1 or sharp drop)
             if m3_qty > 0 and m1_qty < (m2_qty * 0.7) and m2_qty < (m3_qty * 1.2):
-                # Dropped by more than 30% from month 2
-                declining_trends.append(f"**{p}** (বিক্রি কমেছে: ৩ মাস আগে {m3_qty:.0f}টি ➡️ গত মাসে {m2_qty:.0f}টি ➡️ এই মাসে {m1_qty:.0f}টি)")
-            # Case: Accelerating trend (Month 1 > Month 2 by 40%+)
+                declining_trends.append(f"**{p}** (বিক্রি ৩ মাস আগে ছিল {m3_qty:.0f}টি, এখন মাত্র {m1_qty:.0f}টি)")
             elif m1_qty > (m2_qty * 1.4) and (m1_qty > 3 or m2_qty > 3):
-                accelerating_trends.append(f"**{p}** (বিক্রি বেড়েছে: গত মাসে {m2_qty:.0f}টি ➡️ এই মাসে {m1_qty:.0f}টি)")
+                accelerating_trends.append(f"**{p}** (বিক্রি গত মাসের চেয়ে {m1_qty - m2_qty:.0f}টি বেড়েছে)")
 
-        # 9. Sales velocity and Stockout/Overstock prediction
+        # 8. Sales velocity and Stockout prediction
         stockout_predictions = []
         sales_velocity_alerts = []
-        overstock_alerts = []
         
-        velocity_tiers = {"fast": 0, "steady": 0, "slow": 0}
         span_days = max(days_limit, 1)
-
         for p, qty in product_sales_qty.items():
             daily_velocity = qty / span_days
-            
-            # Tiering
-            if daily_velocity >= 1.0:
-                velocity_tiers["fast"] += 1
-            elif daily_velocity >= 0.3:
-                velocity_tiers["steady"] += 1
-            else:
-                velocity_tiers["slow"] += 1
-
             if daily_velocity > 0.3:
                 sales_velocity_alerts.append(f"{p} ({daily_velocity:.1f}টি/দিন)")
             
-            # Predict stockout duration
             remaining_stock = product_stock_levels.get(p, 0.0)
             if daily_velocity > 0:
                 days_left = remaining_stock / daily_velocity
                 if days_left <= 7:
-                    stockout_predictions.append(f"{p} ({days_left:.1f} দিন বাকি)")
-                elif days_left > 45:
-                    overstock_alerts.append(f"{p} ({days_left:.0f} দিনের স্টক বাকি)")
+                    stockout_predictions.append(f"{p} ({days_left:.1f} দিনে ফুরিয়ে যাবে)")
 
-        # Prepare extra analytical context
         extra_stats = {
-            "velocity_tiers": velocity_tiers,
-            "dead_details": dead_stock_details,
-            "overstock": overstock_alerts,
-            "revenue_concentration": revenue_concentration_msg,
             "declining_trends": declining_trends,
             "accelerating_trends": accelerating_trends
         }
 
-        # 10. Create computed summary representation for caching key
+        # 9. Create computed summary representation for caching key
         summary_dict = {
             "total_revenue": total_revenue,
             "revenue_growth": round(revenue_growth, 2),
@@ -290,14 +218,13 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             "dead_stock_value": dead_stock_value,
             "top_product": top_product,
             "stockout_predictions": sorted(stockout_predictions),
-            "sales_velocity_alerts": sorted(sales_velocity_alerts),
             "customer_baki": customer_baki,
             "supplier_baki": supplier_baki,
             "declining_trends_hash": str(sorted(declining_trends)),
             "accelerating_trends_hash": str(sorted(accelerating_trends))
         }
 
-        # 11. Query Cache
+        # 10. Query Cache
         cached_insight = insight_cache.get(shop_name, period, summary_dict)
         if cached_insight:
             analytics_summary = AnalyticsSummary(
@@ -318,49 +245,36 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
                 model="cache-hit"
             )
 
-        # 12. Invoke Groq AI with trajectory & recency prompts
+        # 11. Invoke Groq AI with 2 clear sections
         system_instruction = (
-            "You are an elite, highly strategic AI Retail Business Strategist & Inventory Agent. "
-            "Your goal is to analyze the complete, aggregated store portfolio data, historical monthly trends, and cash flow levels, "
-            "and write an extremely detailed, highly accurate, long-form strategic business blueprint in professional Bengali. "
-            "Do not focus on only one top product; address the health of the entire inventory portfolio to maximize real profits.\n\n"
-            "Format the output strictly into these 4 sections using clear markdown headings:\n"
-            "১. ব্যবসার সামগ্রিক অবস্থা ও বিক্রয় প্রক্ষেপণ (Sales & Revenue Projections)\n"
-            "২. সাম্প্রতিক ট্রেন্ড ও চাহিদা পরিবর্তন (Demand Trajectory Alerts)\n"
-            "৩. সরবরাহ চেইন ও স্টকআউট পূর্বাভাস (Stockout & Supply Chain Projections)\n"
-            "৪. মূলধন অবরুদ্ধ ও লোকসান এড়ানোর অ্যাকশন প্ল্যান (Locked Capital & Profit Actions)\n\n"
+            "You are an elite AI Retail Strategy Strategist who writes simple, direct business reports in Bengali "
+            "that even a 10-year-old child (class 5 pass student) can instantly understand. Avoid any high-level business jargon.\n\n"
+            "Format the output strictly into these 2 sections using clear markdown headings:\n"
+            "১. লাভ বাড়ানোর নিশ্চিত উপায় (Steps for More Profit)\n"
+            "২. লোকসান এড়ানোর সতর্কতা (Avoid Loss Warnings)\n\n"
             "Core Guidelines:\n"
-            "- Speak directly to the merchant with authority. Use bold values, currency figures (৳), and growth percentages.\n"
-            "- In Section 2, focus deeply on Time-Decay demand trajectory. Call out products that are declining in sales (was popular 2-3 months ago but dropped this month) and warn the merchant not to restock them. Contrast this with accelerating demand items.\n"
-            "- Contrast customer receivables vs. supplier payables, advising on collection strategies to resolve supplier debt.\n"
-            "- Propose realistic promotion bundles matching top-velocity products with dead stock items to recover locked capital.\n"
-            "- Keep the response comprehensive, deeply analytical, and useful. Avoid generic filler. Limit to 380-480 words."
+            "- Speak directly to the merchant in very simple, friendly, and authoritative Bengali.\n"
+            "- Under Section 1, list 3 clear bullet points: which fast-moving/accelerating items to buy more of, how to collect customer baki to get cash, and how to pack dead stock with popular items to recover money.\n"
+            "- Under Section 2, list 3 clear warnings: which items are declining in sales (e.g. popular historically but dropped now) and MUST NOT be restocked, which items are running out of stock (stockout risk), and supplier dues warning.\n"
+            "- Keep sentences short, simple, and punchy. Avoid corporate language. Limit to 200-280 words."
         )
 
-        dead_stock_list_str = ", ".join([f"{name} (৳{val:.2f})" for name, val in dead_stock_details[:5]]) if dead_stock_details else "নেই"
-        declining_list_str = "; ".join(declining_trends[:4]) if declining_trends else "কোনো উল্লেখযোগ্য অবনতি নেই"
-        accelerating_list_str = "; ".join(accelerating_trends[:4]) if accelerating_trends else "কোনো উল্লেখযোগ্য বৃদ্ধি নেই"
-        overstock_list_str = ", ".join(overstock_alerts[:5]) if overstock_alerts else "নেই"
+        dead_stock_list_str = ", ".join([f"{name} (৳{val:.2f})" for name, val in dead_stock_details[:3]]) if dead_stock_details else "নেই"
+        declining_list_str = "; ".join(declining_trends[:3]) if declining_trends else "কোনো উল্লেখযোগ্য অবনতি নেই"
+        accelerating_list_str = "; ".join(accelerating_trends[:3]) if accelerating_trends else "কোনো উল্লেখযোগ্য বৃদ্ধি নেই"
 
         user_content = (
             f"দোকানের নাম: {shop_name}\n"
-            f"বিশ্লেষণ সময়কাল: {period}\n"
             f"মোট রাজস্ব: ৳{total_revenue:.2f}\n"
             f"রাজস্ব প্রবৃদ্ধি হার: {revenue_growth:.1f}%\n"
-            f"মোট ইনভেন্টরি মূলধন (স্টকে থাকা পণ্যের ক্রয়মূল্য): ৳{inventory_value:.2f}\n"
-            f"মোট অচল পণ্যে আটকে থাকা অকেজো মূলধন: ৳{dead_stock_value:.2f}\n"
-            f"শীর্ষ অচল পণ্যের তালিকা ও মূলধন: {dead_stock_list_str}\n"
-            f"ক্রেতাদের কাছে মোট বকেয়া পাওনা (কাস্টমার বাকি): ৳{customer_baki:.2f}\n"
-            f"মহাজনদের কাছে মোট বকেয়া দেনা (সাপ্লায়ার বাকি): ৳{supplier_baki:.2f}\n"
-            f"মোট রাজস্বের কেন্দ্রীকরণ (৮০/২০ সূত্র): {revenue_concentration_msg}\n"
-            f"বিক্রয়ের গতিবেগ প্রোফাইল: {velocity_tiers.get('fast', 0)}টি দ্রুত বিক্রেতা, {velocity_tiers.get('steady', 0)}টি মাঝারি বিক্রেতা, {velocity_tiers.get('slow', 0)}টি ধীর বিক্রেতা\n"
+            f"অচল পণ্যে আটকে থাকা অকেজো মূলধন: ৳{dead_stock_value:.2f} (শীর্ষ অচল: {dead_stock_list_str})\n"
+            f"কাস্টমারদের কাছে বাকি পাওনা: ৳{customer_baki:.2f}\n"
+            f"মহাজনদের কাছে দেনা: ৳{supplier_baki:.2f}\n"
             f"সর্বাধিক বিক্রিত পণ্য: {top_product}\n"
-            f"শীর্ষ ৮ পণ্য রাজস্ব: {revenue_ranking_str}\n"
-            f"স্টকআউট পূর্বাভাস (দিন বাকি): {', '.join(stockout_predictions) if stockout_predictions else 'নেই'}\n"
-            f"অতিরিক্ত ওভারস্টক পণ্য তালিকা (প্রয়োজনের চেয়ে বেশি স্টক): {overstock_list_str}\n"
-            f"📉 চাহিদা হ্রাস পাওয়া পণ্যের ট্রাজেক্টরি (Month 3 ➡️ Month 2 ➡️ Month 1): {declining_list_str}\n"
-            f"📈 চাহিদা বৃদ্ধি পাওয়া পণ্যের ট্রাজেক্টরি: {accelerating_list_str}\n\n"
-            "এই বিস্তারিত ডিস্ট্রিবিউশন তথ্যের ওপর ভিত্তি করে দোকানটিকে একটি বড় লাভজনক ডেসিনেশনে পরিণত করার জন্য একটি শক্তিশালী অ্যাকশন প্ল্যান ও রিয়ালিস্টিক প্রজেকশন দিন।"
+            f"স্টকআউট পূর্বাভাস (দ্রুত শেষ হবে): {', '.join(stockout_predictions) if stockout_predictions else 'নেই'}\n"
+            f"📉 বিক্রি কমে যাওয়া পণ্যের তালিকা: {declining_list_str}\n"
+            f"📈 বিক্রি বৃদ্ধি পাওয়া পণ্যের তালিকা: {accelerating_list_str}\n\n"
+            "উপরে দেওয়া ডেটার ওপর ভিত্তি করে লাভ বাড়ানোর উপায় এবং লোকসান এড়ানোর সতর্কতা খুব সহজে লিখুন।"
         )
 
         messages = [
@@ -374,8 +288,8 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
         try:
             ai_insight_text, _ = await groq_service.generate_chat_completion(
                 messages=messages,
-                temperature=0.75,
-                max_tokens=1100,
+                temperature=0.7,
+                max_tokens=700,
                 model=model_name
             )
         except Exception as api_err:
@@ -384,8 +298,8 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
                 model_name = settings.GROQ_MODEL
                 ai_insight_text, _ = await groq_service.generate_chat_completion(
                     messages=messages,
-                    temperature=0.75,
-                    max_tokens=1100,
+                    temperature=0.7,
+                    max_tokens=700,
                     model=model_name
                 )
             except Exception as final_api_err:
@@ -393,14 +307,11 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
                 model_name = "local-rule-engine"
                 ai_insight_text = generate_local_fallback_insights(
                     shop_name=shop_name,
-                    period=period,
                     total_revenue=total_revenue,
                     revenue_growth=revenue_growth,
-                    inventory_value=inventory_value,
                     dead_stock_value=dead_stock_value,
                     top_product=top_product,
                     stockout_predictions=stockout_predictions,
-                    sales_velocity_alerts=sales_velocity_alerts,
                     customer_baki=customer_baki,
                     supplier_baki=supplier_baki,
                     extra_stats=extra_stats
