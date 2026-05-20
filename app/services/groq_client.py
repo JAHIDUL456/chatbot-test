@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple, Any, AsyncGenerator
+from typing import List, Dict, Optional, Tuple, Any
 from groq import AsyncGroq
 import logging
 
@@ -22,7 +22,8 @@ class GroqService:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        model: Optional[str] = None
     ) -> Tuple[str, Optional[Dict[str, int]]]:
         """
         Asynchronously sends a message history payload to Groq model to generate a completion response.
@@ -30,16 +31,18 @@ class GroqService:
         :param messages: List of dictionaries matching Groq's ChatCompletion schema (role/content).
         :param temperature: Creativity parameter (0.0 to 2.0).
         :param max_tokens: Upper token limit for model output.
+        :param model: The name of the model to use. Fallback to settings.GROQ_MODEL if None.
         :return: A tuple containing (generated response text, token usage dict).
         """
         try:
+            target_model = model or self.model
             logger.debug(
-                f"Calling Groq API. Model: '{self.model}', Messages count: {len(messages)}"
+                f"Calling Groq API. Model: '{target_model}', Messages count: {len(messages)}"
             )
             
             completion = await self.client.chat.completions.create(
                 messages=messages,  # type: ignore
-                model=self.model,
+                model=target_model,
                 temperature=temperature,
                 max_tokens=max_tokens
             )
@@ -60,43 +63,6 @@ class GroqService:
             
         except Exception as e:
             logger.error(f"Error in Groq API request flow: {str(e)}")
-            raise e
-
-    async def generate_chat_stream(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None
-    ) -> AsyncGenerator[str, None]:
-        """
-        Asynchronously streams the chat completion from Groq API token-by-token.
-        Useful for providing immediate feedback on long responses and managing connection lifecycle.
-        
-        :param messages: List of dictionaries representing the chat history.
-        :param temperature: Creativity parameter (0.0 to 2.0).
-        :param max_tokens: Upper token limit for model output.
-        :return: Async generator yielding text chunks as they arrive.
-        """
-        try:
-            logger.debug(
-                f"Calling Groq Streaming API. Model: '{self.model}', Messages count: {len(messages)}"
-            )
-            
-            stream = await self.client.chat.completions.create(
-                messages=messages,  # type: ignore
-                model=self.model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True
-            )
-            
-            async for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content is not None:
-                    yield content
-                    
-        except Exception as e:
-            logger.error(f"Error in Groq streaming request flow: {str(e)}")
             raise e
 
 
