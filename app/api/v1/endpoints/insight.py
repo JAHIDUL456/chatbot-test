@@ -35,7 +35,7 @@ def generate_local_fallback_insights(
     extra_stats: Dict[str, Any]
 ) -> str:
     """
-    Generates a simple, direct fallback report with exactly two sections.
+    Generates a simple, direct fallback report with exactly two sections and expanded points.
     """
     growth_sign = "+" if revenue_growth >= 0 else ""
     declining_trends = extra_stats.get("declining_trends", [])
@@ -245,18 +245,18 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
                 model="cache-hit"
             )
 
-        # 11. Invoke Groq AI with 2 clear sections
+        # 11. Invoke Groq AI with 2 clear sections - expanded to give even more life-saving profit advice
         system_instruction = (
-            "You are an elite AI Retail Strategy Strategist who writes simple, direct business reports in Bengali "
-            "that even a 10-year-old child (class 5 pass student) can instantly understand. Avoid any high-level business jargon.\n\n"
+            "You are a legendary AI Retail Strategy Strategist who writes simple, direct business reports in Bengali "
+            "that even a 10-year-old child (class 5 pass student) can instantly understand and act upon to save their business.\n\n"
             "Format the output strictly into these 2 sections using clear markdown headings:\n"
             "১. লাভ বাড়ানোর নিশ্চিত উপায় (Steps for More Profit)\n"
             "২. লোকসান এড়ানোর সতর্কতা (Avoid Loss Warnings)\n\n"
             "Core Guidelines:\n"
             "- Speak directly to the merchant in very simple, friendly, and authoritative Bengali.\n"
-            "- Under Section 1, list 3 clear bullet points: which fast-moving/accelerating items to buy more of, how to collect customer baki to get cash, and how to pack dead stock with popular items to recover money.\n"
-            "- Under Section 2, list 3 clear warnings: which items are declining in sales (e.g. popular historically but dropped now) and MUST NOT be restocked, which items are running out of stock (stockout risk), and supplier dues warning.\n"
-            "- Keep sentences short, simple, and punchy. Avoid corporate language. Limit to 200-280 words."
+            "- Under Section 1, provide 4 highly actionable, clear bullet points: which specific high-growth/popular items to stock up on immediately, how to collect customer baki step-by-step, a dynamic combo bundling idea using dead stock, and a seasonal stocking advice based on history.\n"
+            "- Under Section 2, provide 4 extremely direct warnings: which items are crashing in demand and MUST NOT be restocked, which items will run dry this week (stockout predictions), a critical warning on supplier dues to avoid supply suspension, and a warning on dead capital pricing strategy.\n"
+            "- Keep sentences short, simple, and punchy. Make it feel extremely premium, expert, and life-saving. Limit to 300-380 words."
         )
 
         dead_stock_list_str = ", ".join([f"{name} (৳{val:.2f})" for name, val in dead_stock_details[:3]]) if dead_stock_details else "নেই"
@@ -289,7 +289,7 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
             ai_insight_text, _ = await groq_service.generate_chat_completion(
                 messages=messages,
                 temperature=0.7,
-                max_tokens=700,
+                max_tokens=850,
                 model=model_name
             )
         except Exception as api_err:
@@ -299,7 +299,7 @@ async def generate_insight(request: InsightRequest) -> InsightResponse:
                 ai_insight_text, _ = await groq_service.generate_chat_completion(
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=700,
+                    max_tokens=850,
                     model=model_name
                 )
             except Exception as final_api_err:
